@@ -133,14 +133,16 @@ module Grape
       @routes = nil
     end
 
-    def mount_in(router)
+    # @param stacks [Hash] the middleware stacks built so far while compiling
+    #   the API that owns +router+, shared by every endpoint mounted into it.
+    def mount_in(router, stacks: {})
       if endpoints
-        compile!
-        return endpoints.each { |e| e.mount_in(router) }
+        compile!(stacks)
+        return endpoints.each { |e| e.mount_in(router, stacks:) }
       end
 
       reset_routes!
-      compile!
+      compile!(stacks)
       append_routes_to(router)
     end
 
@@ -330,8 +332,8 @@ module Grape
       ActiveSupport::Notifications.instrument('endpoint_run_filters.grape', endpoint: self, filters:, type:, &)
     end
 
-    def compile!
-      app = config.app || build_stack
+    def compile!(stacks)
+      app = config.app || build_stack(stacks)
       warn_unauthenticated_mounted_app
       # nil when no phase has a filter -- most endpoints -- so that #run skips
       # all five on one read.
@@ -455,37 +457,57 @@ module Grape
       namespace_inheritable_version.length == 1 ? namespace_inheritable_version.first : namespace_inheritable_version
     end
 
-    def build_stack
-      stack = Grape::Middleware::Stack.new
-
+    # A stack holds nothing of the endpoint it was built for (the endpoint to
+    # run comes out of the env, see RUN_ENDPOINT), so endpoints whose stack
+    # settings are equal share the first one built rather than each building
+    # its own copy of every middleware.
+    def build_stack(stacks)
       setting = inheritable_setting
       content_types = setting.content_types
       format = setting.format
+      error_options = error_middleware_options(format, content_types)
+      middleware = setting.middleware
+      versioner = versioner_middleware
+      formatter_options = formatter_middleware_options(format, content_types)
 
+      stacks[stack_key(error_options, middleware, versioner, formatter_options)] ||=
+        assemble_stack(error_options, middleware, versioner, formatter_options)
+    end
+
+    # Hash equality ignores order, but rescue handlers match, and content
+    # types negotiate, in the order they were declared.
+    def stack_key(error_options, middleware, versioner, formatter_options)
+      [
+        error_options, error_options[:rescue_handlers]&.to_a, error_options[:content_types]&.to_a,
+        middleware, versioner, formatter_options
+      ]
+    end
+
+    def assemble_stack(error_options, middleware, versioner, formatter_options)
+      stack = Grape::Middleware::Stack.new
       stack.use Rack::Head
-      stack.use Grape::Middleware::Error, **error_middleware_options(format, content_types)
-
-      stack.concat setting.middleware
-      use_versioner(stack)
-      stack.use Grape::Middleware::Formatter, **formatter_middleware_options(format, content_types)
+      stack.use Grape::Middleware::Error, **error_options
+      stack.concat middleware
+      stack.use versioner.first, **versioner.last if versioner
+      stack.use Grape::Middleware::Formatter, **formatter_options
 
       builder = stack.build
       builder.run RUN_ENDPOINT
       builder.to_app
     end
 
-    # The versioner for the strategy +version+ declared, when it declared one.
-    def use_versioner(stack)
+    # The versioner for the strategy +version+ declared, and its options, when
+    # it declared one.
+    def versioner_middleware
       setting = inheritable_setting
       versions = setting.version
       return if versions.nil? || versions.empty?
 
       version_options = setting.version_options
-      stack.use Grape::Middleware::Versioner.using(version_options.using),
-                versions: versions.flatten,
-                version_options:,
-                prefix: setting.root_prefix,
-                mount_path: setting.mount_path
+      [
+        Grape::Middleware::Versioner.using(version_options.using),
+        { versions: versions.flatten, version_options:, prefix: setting.root_prefix, mount_path: setting.mount_path }
+      ]
     end
 
     def formatter_middleware_options(format, content_types)

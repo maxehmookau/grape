@@ -98,6 +98,7 @@
 * [#3039](https://github.com/ruby-grape/grape/pull/3039): Hold every module to RuboCop's default length - [@ericproulx](https://github.com/ericproulx).
 * [#3031](https://github.com/ruby-grape/grape/pull/3031): Define `InheritableSetting`'s scalar settings and scope flags by key - [@ericproulx](https://github.com/ericproulx).
 * [#3032](https://github.com/ruby-grape/grape/pull/3032): Keep each API's content type order when negotiating a browser's `*/*` - [@ericproulx](https://github.com/ericproulx).
+* [#XXXX](https://github.com/ruby-grape/grape/pull/XXXX): Share one middleware stack between endpoints whose stack settings are equal - [@maxehmookau](https://github.com/maxehmookau).
 * Your contribution here.
 
 ### 4.0.1 (2026-09-15)

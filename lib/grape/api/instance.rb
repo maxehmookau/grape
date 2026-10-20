@@ -106,8 +106,10 @@ module Grape
       def initialize
         @router = Router.new
         add_head_not_allowed_methods_and_options_methods
+        # Kept for this compile only, so no stack outlives the API it was built for.
+        stacks = {}
         self.class.endpoints.each do |endpoint|
-          endpoint.mount_in(@router)
+          endpoint.mount_in(@router, stacks:)
         end
 
         @router.compile!
